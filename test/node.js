@@ -2732,6 +2732,65 @@ t.test('overrides', (t) => {
     t.end()
   })
 
+  t.test('canReplaceWith requires the same overrides', async (t) => {
+    const original = new Node({
+      loadOverrides: true,
+      path: '/some/path',
+      pkg: {
+        name: 'foo',
+        dependencies: {
+          bar: '^1',
+        },
+        overrides: {
+          bar: { '.': '2.0.0' },
+        },
+      },
+      children: [
+        { pkg: { name: 'bar', version: '1.0.0' } },
+      ],
+    })
+
+    const badReplacement = new Node({
+      loadOverrides: true,
+      path: '/some/path',
+      pkg: {
+        name: 'foo',
+        dependencies: {
+          bar: '^1',
+        },
+        overrides: {
+          bar: { '.': '2.0.0' },
+        },
+      },
+      children: [
+        { pkg: { name: 'bar', version: '1.0.0' } },
+      ],
+    })
+
+    t.equal(original.canReplaceWith(badReplacement), false, 'different overrides fails')
+
+    const goodReplacement = new Node({
+      path: '/some/path',
+      pkg: {
+        name: 'foo',
+        dependencies: {
+          bar: '^1',
+        },
+        overrides: {
+          bar: { '.': '2.0.0' },
+        },
+      },
+      children: [
+        { pkg: { name: 'bar', version: '1.0.0' } },
+      ],
+    })
+
+    t.equal(original.canReplaceWith(goodReplacement), false, 'no overrides fails')
+
+    goodReplacement.overrides = original.overrides
+    t.equal(original.canReplaceWith(goodReplacement), true, 'same overrides passes')
+  })
+
   // XXX write negative tests too
 
   t.end()
