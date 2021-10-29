@@ -145,4 +145,22 @@ t.test('constructor', async (t) => {
     t.equal(childFooRule.keySpec, '', 'keySpec is empty')
     t.equal(childFooRule.value, '', 'value is empty')
   })
+
+  t.test('coerces empty string to *', async (t) => {
+    const overrides = new OverrideSet({
+      overrides: {
+        foo: {
+          '.': '',
+        },
+        bar: {
+        },
+      },
+    })
+
+    const edgeRule = overrides.getEdgeRule({ name: 'foo', spec: '^1' })
+    t.equal(edgeRule.value, '*', 'empty string was replaced with *')
+
+    const barEdgeRule = overrides.getEdgeRule({ name: 'bar', spec: '^1' })
+    t.equal(barEdgeRule.value, '', 'when rule is omitted entirely value is an empty string')
+  })
 })
