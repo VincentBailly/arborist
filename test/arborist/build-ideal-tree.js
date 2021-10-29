@@ -2953,3 +2953,27 @@ t.test('peer conflicts between peer sets in transitive deps', t => {
 
   t.end()
 })
+
+t.test('overrides', t => {
+  t.test('respects an override', async (t) => {
+    const path = t.testdir({
+      'package.json': JSON.stringify({
+        name: 'root',
+        dependencies: {
+          abbrev: '1.0.3',
+        },
+        overrides: {
+          abbrev: '1.1.1',
+        },
+      }),
+    })
+
+    const tree = await buildIdeal(path)
+    const edge = tree.edgesOut.get('abbrev')
+    t.equal(edge.valid, true)
+    const abbrev = tree.children.get('abbrev')
+    t.equal(abbrev.version, '1.1.1')
+  })
+
+  t.end()
+})

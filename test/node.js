@@ -2732,5 +2732,7 @@ t.test('overrides', (t) => {
     t.end()
   })
 
+  // XXX write negative tests too
+
   t.end()
 })
