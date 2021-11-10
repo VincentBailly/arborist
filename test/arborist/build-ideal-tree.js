@@ -14,6 +14,8 @@ require(fixtures)
 const {start, stop, registry, auditResponse} = require('../fixtures/registry-mocks/server.js')
 const npa = require('npm-package-arg')
 const fs = require('fs')
+const nock = require('nock')
+const semver = require('semver')
 
 t.before(start)
 t.teardown(stop)
@@ -60,6 +62,44 @@ const OPT = { cache, registry, timeout: 30 * 60 * 1000 }
 
 const newArb = (path, opt = {}) => new Arborist({ ...OPT, path, ...opt })
 const buildIdeal = (path, opt) => newArb(path, opt).buildIdealTree(opt)
+
+const generateNocks = (spec) => {
+  const scopes = []
+
+  for (const name in spec) {
+    const pkg = spec[name]
+
+    const packument = {
+      name,
+      'dist-tags': {
+        latest: pkg.latest || semver.maxSatisfying(pkg.versions, '*'),
+      },
+      versions: pkg.versions.reduce((versions, version) => {
+        return {
+          ...versions,
+          [version]: {
+            name,
+            version,
+            dependencies: pkg.dependencies ? pkg.dependencies.reduce((deps, dep) => {
+              return {
+                ...deps,
+                [dep]: version,
+              }
+            }, {}) : {},
+          },
+        }
+      }, {}),
+    }
+
+    const scope = nock(registry)
+      .get(`/${name}`)
+      .reply(200, packument)
+
+    scopes.push(scope)
+  }
+
+  return scopes
+}
 
 t.test('fail on mismatched engine when engineStrict is set', async t => {
   const path = resolve(fixtures, 'engine-specification')
@@ -2973,6 +3013,98 @@ t.test('overrides', t => {
     t.equal(edge.valid, true)
     const abbrev = tree.children.get('abbrev')
     t.equal(abbrev.version, '1.1.1')
+  })
+
+  t.test('overrides a nested dependency', async (t) => {
+    const path = t.testdir({
+      'package.json': JSON.stringify({
+        name: 'root',
+        dependencies: {
+          once: '1.4.0',
+        },
+        overrides: {
+          wrappy: '1.0.0',
+        },
+      }),
+    })
+
+    const tree = await buildIdeal(path)
+    const onceEdge = tree.edgesOut.get('once')
+    t.equal(onceEdge.valid, true)
+    const onceWrappyEdge = onceEdge.to.edgesOut.get('wrappy')
+    t.equal(onceWrappyEdge.valid, true)
+    t.equal(onceWrappyEdge.to.version, '1.0.0')
+  })
+
+  t.test('overrides a nested dependency without overriding a top level', async (t) => {
+    const path = t.testdir({
+      'package.json': JSON.stringify({
+        name: 'root',
+        dependencies: {
+          once: '1.4.0',
+          wrappy: '1.0.2',
+        },
+        overrides: {
+          once: {
+            wrappy: '1.0.0',
+          },
+        },
+      }),
+    })
+
+    const tree = await buildIdeal(path)
+    const onceEdge = tree.edgesOut.get('once')
+    t.equal(onceEdge.valid, true)
+    const onceWrappyEdge = onceEdge.to.edgesOut.get('wrappy')
+    t.equal(onceWrappyEdge.valid, true)
+    t.equal(onceWrappyEdge.to.version, '1.0.0')
+    const wrappyEdge = tree.edgesOut.get('wrappy')
+    t.equal(wrappyEdge.valid, true)
+    t.equal(wrappyEdge.to.version, '1.0.2')
+  })
+
+  t.test('nock fiddling', async (t) => {
+    const nocks = generateNocks({
+      foo: {
+        versions: ['1.0.0', '1.0.1', '2.0.0'],
+        dependencies: ['bar'],
+      },
+      bar: {
+        versions: ['1.0.0', '1.0.1', '2.0.0'],
+      },
+    })
+
+    const path = t.testdir({
+      'package.json': JSON.stringify({
+        name: 'root',
+        dependencies: {
+          foo: '2.0.0',
+          bar: '1.0.1',
+        },
+        overrides: {
+          foo: {
+            bar: '1.0.1',
+          },
+        },
+      }),
+    })
+
+    const tree = await buildIdeal(path)
+    t.ok(nocks.every((scope) => scope.isDone()), 'fetched all packuments')
+
+    const fooEdge = tree.edgesOut.get('foo')
+    t.equal(fooEdge.valid, true, 'foo is valid')
+    t.equal(fooEdge.to.version, '2.0.0')
+
+    const barEdge = tree.edgesOut.get('bar')
+    t.equal(barEdge.valid, true, 'top level bar is valid')
+    t.equal(barEdge.to.version, '1.0.1')
+
+    const nestedBarEdge = fooEdge.to.edgesOut.get('bar')
+    t.equal(nestedBarEdge.valid, true, 'nested bar is valid')
+    t.equal(nestedBarEdge.to.version, '1.0.1', 'nested bar version was overridden')
+
+    t.equal(barEdge.to, nestedBarEdge.to, 'deduplicated tree correctly')
   })
 
   t.end()
